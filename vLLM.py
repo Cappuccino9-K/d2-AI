@@ -3,6 +3,8 @@ import torch
 import gradio as ui
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
+# 만약 위의 load_model_이 자동완성 오류라면 아래가 맞습니다.
+from dotenv import load_dotenv
 
 hf_hub_download(
     repo_id="Qwen/Qwen2.5-7B-Instruct-GGUF",
@@ -13,8 +15,8 @@ hf_hub_download(
     repo_id="Qwen/Qwen2.5-7B-Instruct-GGUF",
     filename="qwen2.5-7b-instruct-q5_0-00002-of-00002.gguf"
 )
-
-
+#토큰 가져오기
+load_dotenv()
 # ==================== 환경 설정 ====================
 print("=" * 60)
 print(f"PyTorch: {torch.__version__}")
@@ -22,7 +24,9 @@ print(f"CUDA: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
 print("=" * 60)
-os.environ["HF_TOKEN"] = ""
+
+hf_token = os.environ.get("HF_TOKEN")
+
 # ==================== Llama.cpp 모델 로드 ====================
 model_id = "Qwen/Qwen2.5-7B-Instruct-GGUF"
 filename="qwen2.5-7b-instruct-q5_k_m.gguf"
