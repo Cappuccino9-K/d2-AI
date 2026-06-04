@@ -3,7 +3,6 @@ import torch
 import gradio as ui
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
-# 만약 위의 load_model_이 자동완성 오류라면 아래가 맞습니다.
 from dotenv import load_dotenv
 
 hf_hub_download(
