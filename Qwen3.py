@@ -17,7 +17,6 @@ print("=" * 60)
 # ==================== Llama.cpp 로컬 모델 로드 ====================
 print("로컬에서 Qwen3-8B 모델 로드 중... (RTX 5070 최적화)")
 
-# 💡 수정된 부분: 제공해주신 절대 경로와 파일명을 올바르게 매핑했습니다.
 local_model_path = r"C:\Users\KYJ\PyCharmMiscProject\models\qwen\qwen3-8b-q5_k_m.gguf"
 
 if not os.path.exists(local_model_path):
@@ -28,7 +27,7 @@ if not os.path.exists(local_model_path):
 llm = Llama(
     model_path=local_model_path,  # 로컬 절대 경로 지정
     n_gpu_layers=-1,             # RTX 5070에서 전체 GPU 적재
-    n_ctx=32768,                  # 필요시 16384로 증가 가능
+    n_ctx=32768,                  # 16384로 증가 가능
     verbose=False,
 )
 
