@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qwen2.5-7B AI 비서</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        .chat-container { height: calc(100vh - 180px); }
+        .message { max-width: 80%; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="max-w-4xl mx-auto p-4">
+        <h1 class="text-3xl font-bold text-center mb-6 flex items-center justify-center gap-3">
+            <i class="fas fa-robot"></i> Qwen2.5-7B AI
+        </h1>
+
+        <div id="chat" class="chat-container bg-gray-800 rounded-2xl p-6 overflow-y-auto mb-4 space-y-4"></div>
+
+        <div class="flex gap-2">
+            <input 
+                id="input" 
+                type="text" 
+                class="flex-1 bg-gray-700 rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="메시지를 입력하세요..."
+                onkeypress="if(event.key === 'Enter') sendMessage()">
+            <button 
+                onclick="sendMessage()"
+                class="bg-blue-600 hover:bg-blue-700 px-8 rounded-xl font-medium transition">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const chat = document.getElementById('chat');
+        const input = document.getElementById('input');
+        let history = [];
+
+        function addMessage(role, content) {
+            const div = document.createElement('div');
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            div.innerHTML = `
+                <div class="message px-5 py-3 rounded-2xl ${role === 'user' ? 
+                    'bg-blue-600' : 'bg-gray-700'}">
+                    ${content}
+                </div>
+            `;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        let ws;
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${location.host}/ws/chat`);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'stream') {
+                    // 마지막 assistant 메시지 업데이트 (스트리밍)
+                    const lastMsg = chat.lastElementChild;
+                    if (lastMsg) lastMsg.querySelector('div').textContent += data.content;
+                } else if (data.type === 'done') {
+                    history.push({role: "assistant", content: data.content});
+                }
+            };
+        }
+
+        async function sendMessage() {
+            const message = input.value.trim();
+            if (!message || !ws) return;
+
+            addMessage('user', message);
+            history.push({role: "user", content: message});
+            input.value = '';
+
+            // Assistant 자리 미리 만들기
+            const assistantDiv = document.createElement('div');
+            assistantDiv.className = "flex justify-start";
+            assistantDiv.innerHTML = `
+                <div class="message px-5 py-3 rounded-2xl bg-gray-700">생각중...</div>
+            `;
+            chat.appendChild(assistantDiv);
+            chat.scrollTop = chat.scrollHeight;
+
+            ws.send(JSON.stringify({
+                message: message,
+                history: history
+            }));
+        }
+
+        // 초기 연결
+        connectWebSocket();
+    </script>
+</body>
+</html>
