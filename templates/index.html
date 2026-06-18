@@ -9,12 +9,27 @@
     <style>
         .chat-container { height: calc(100vh - 180px); }
         .message { max-width: 80%; }
+        #ttsToggle.muted { color: #6b7280; }
+        #ttsToggle.active { color: #60a5fa; }
     </style>
 </head>
 <body class="bg-gray-900 text-white">
     <div class="max-w-4xl mx-auto p-4">
         <h1 class="text-3xl font-bold text-center mb-6 flex items-center justify-center gap-3">
             <i class="fas fa-robot"></i> Qwen2.5-7B AI
+            <button
+                id="ttsToggle"
+                onclick="toggleAutoTTS()"
+                title="AI 답변 음성으로 읽기 켜기/끄기"
+                class="active text-xl ml-1 hover:text-blue-300 transition">
+                <i class="fas fa-volume-up"></i>
+            </button>
+            <button
+                onclick="openMicSettings()"
+                title="마이크 설정 및 테스트"
+                class="text-xl ml-1 text-gray-400 hover:text-blue-300 transition">
+                <i class="fas fa-microphone-lines"></i>
+            </button>
         </h1>
 
         <div id="chat" class="chat-container bg-gray-800 rounded-2xl p-6 overflow-y-auto mb-4 space-y-4"></div>
@@ -24,7 +39,7 @@
                 id="input" 
                 type="text" 
                 class="flex-1 bg-gray-700 rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="메시지를 입력하세요..."
+                placeholder="메시지를 입력하세요... (V를 눌러서 말하기)"
                 onkeypress="if(event.key === 'Enter') sendMessage()">
             <button 
                 onclick="sendMessage()"
@@ -32,12 +47,425 @@
                 <i class="fas fa-paper-plane"></i>
             </button>
         </div>
+
+        <div id="micStatus" class="hidden mt-3 flex items-center justify-center gap-2 text-sm text-red-400">
+            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            음성 인식 중입니다... (V 키를 떼면 종료)
+        </div>
+    </div>
+
+    <!-- 마이크 설정 / 테스트 모달 -->
+    <div id="micSettingsModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeMicSettings()">
+        <div class="bg-gray-800 rounded-2xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between">
+                <h2 class="text-xl font-bold flex items-center gap-2">
+                    <i class="fas fa-microphone-lines"></i> 마이크 설정 및 테스트
+                </h2>
+                <button onclick="closeMicSettings()" class="text-gray-400 hover:text-white text-xl">
+                    <i class="fas fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- 지원 여부 / 권한 상태 -->
+            <div class="bg-gray-900 rounded-xl p-4 text-sm space-y-2">
+                <div class="flex justify-between">
+                    <span class="text-gray-400">음성 인식(STT) 지원</span>
+                    <span id="sttSupportBadge">확인 중...</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">마이크 권한</span>
+                    <span id="micPermissionBadge">확인 중...</span>
+                </div>
+            </div>
+
+            <!-- 장치 선택 -->
+            <div class="space-y-2">
+                <label class="text-sm text-gray-400 flex items-center justify-between">
+                    입력 장치 선택
+                    <button onclick="refreshMicDevices()" class="text-blue-400 hover:text-blue-300 text-xs">
+                        <i class="fas fa-rotate"></i> 새로고침
+                    </button>
+                </label>
+                <select id="micDeviceSelect" class="w-full bg-gray-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option>장치 목록을 불러오려면 새로고침을 눌러주세요</option>
+                </select>
+            </div>
+
+            <!-- 입력 레벨(소리 감지) 테스트 -->
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-400">소리 감지 테스트</span>
+                    <button id="levelTestBtn" onclick="toggleLevelTest()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-lg text-sm transition">
+                        테스트 시작
+                    </button>
+                </div>
+                <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
+                    <div id="levelBar" class="h-full bg-green-500 transition-all" style="width: 0%"></div>
+                </div>
+                <p id="levelStatusText" class="text-xs text-gray-500">테스트 시작을 누르고 마이크에 말해보세요.</p>
+            </div>
+
+            <!-- 실시간 인식 테스트 -->
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-400">음성 → 텍스트 인식 테스트</span>
+                    <button id="sttTestBtn" onclick="toggleSttTest()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-lg text-sm transition">
+                        테스트 시작
+                    </button>
+                </div>
+                <div id="sttTestResult" class="w-full min-h-[3rem] bg-gray-900 rounded-xl px-4 py-3 text-sm text-gray-300">
+                    여기에 인식된 텍스트가 표시됩니다.
+                </div>
+            </div>
+
+            <p class="text-xs text-gray-500 leading-relaxed">
+                참고: 위 장치 선택은 "소리 감지 테스트"에만 적용됩니다. 브라우저의 음성 인식(V키 기능)은 운영체제에 설정된 기본 마이크를 사용하므로, 특정 장치를 강제로 쓰고 싶다면 OS의 사운드 설정에서 기본 입력 장치를 바꿔야 합니다.
+            </p>
+        </div>
     </div>
 
     <script>
         const chat = document.getElementById('chat');
         const input = document.getElementById('input');
+        const ttsToggleBtn = document.getElementById('ttsToggle');
         let history = [];
+
+        /* ===================== TTS (Text-to-Speech) ===================== */
+        let autoTTSEnabled = true;   // AI 답변이 끝나면 자동으로 읽어줄지 여부
+        let koreanVoice = null;      // 사용 가능한 한국어 음성 캐시
+
+        function loadVoices() {
+            if (!('speechSynthesis' in window)) return;
+            const voices = speechSynthesis.getVoices();
+            koreanVoice =
+                voices.find(v => v.lang === 'ko-KR') ||
+                voices.find(v => v.lang && v.lang.toLowerCase().startsWith('ko')) ||
+                null;
+        }
+
+        if ('speechSynthesis' in window) {
+            loadVoices();
+            // 일부 브라우저(Chrome 등)는 음성 목록을 비동기로 불러옴
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+
+        // HTML 태그 및 마크다운 기호를 제거해 듣기 자연스러운 텍스트로 변환
+        function stripForSpeech(rawText) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = rawText;
+            let text = tmp.textContent || tmp.innerText || '';
+            text = text.replace(/[*_`#>~]/g, ' ');
+            return text.replace(/\s+/g, ' ').trim();
+        }
+
+        function speakText(rawText) {
+            if (!('speechSynthesis' in window)) return;
+            const text = stripForSpeech(rawText);
+            if (!text) return;
+
+            speechSynthesis.cancel(); // 이전에 재생 중인 음성은 중단 후 새로 시작
+
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'ko-KR';
+            utter.rate = 1;
+            utter.pitch = 1;
+            if (koreanVoice) utter.voice = koreanVoice;
+
+            speechSynthesis.speak(utter);
+        }
+
+        function stopSpeaking() {
+            if ('speechSynthesis' in window) speechSynthesis.cancel();
+        }
+
+        function toggleAutoTTS() {
+            autoTTSEnabled = !autoTTSEnabled;
+            ttsToggleBtn.classList.toggle('active', autoTTSEnabled);
+            ttsToggleBtn.classList.toggle('muted', !autoTTSEnabled);
+            ttsToggleBtn.innerHTML = autoTTSEnabled
+                ? '<i class="fas fa-volume-up"></i>'
+                : '<i class="fas fa-volume-mute"></i>';
+            if (!autoTTSEnabled) stopSpeaking();
+        }
+        /* =================================================================== */
+
+        /* ===================== 공통: SpeechRecognition 생성 팩토리 ===================== */
+        // onUpdate(finalText, interimText): 인식 결과가 들어올 때마다 호출
+        // getIsActive(): 계속 들어야 하는 상태인지 (true면 onend에서 자동 재시작)
+        // onErrorCb(errorCode): 오류 발생 시 호출
+        function createSpeechRecognizer(onUpdate, getIsActive, onErrorCb) {
+            const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognitionImpl) return null;
+
+            const recog = new SpeechRecognitionImpl();
+            recog.lang = 'ko-KR';
+            recog.continuous = true;     // 멈추라고 할 때까지 계속 인식
+            recog.interimResults = true; // 인식 중인 내용도 실시간으로 보여줌
+
+            recog.onresult = (event) => {
+                let finalText = '';
+                let interimText = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) finalText += transcript;
+                    else interimText += transcript;
+                }
+                onUpdate(finalText, interimText);
+            };
+
+            recog.onerror = (event) => {
+                console.error('음성 인식 오류:', event.error);
+                if (onErrorCb) onErrorCb(event.error);
+            };
+
+            recog.onend = () => {
+                // continuous 모드라도 브라우저가 중간에 자동으로 멈추는 경우가 있어
+                // 계속 듣는 상태라면 다시 시작해줌
+                if (getIsActive && getIsActive()) {
+                    try { recog.start(); } catch (e) {}
+                }
+            };
+
+            return recog;
+        }
+        /* =================================================================== */
+
+        /* ===================== STT (V키를 눌러서 말하기) ===================== */
+        const micStatus = document.getElementById('micStatus');
+        let recognition = null;   // 푸시투토크용 SpeechRecognition 인스턴스
+        let isListening = false;  // 현재 V키를 눌러 녹음 중인지 여부
+        let baseInputValue = '';  // 녹음 시작 시점에 입력창에 있던 텍스트 (이어쓰기용)
+
+        function startVoiceInput() {
+            if (isListening) return;
+            if (!recognition) {
+                recognition = createSpeechRecognizer(
+                    (finalText, interimText) => {
+                        if (finalText) baseInputValue += finalText;
+                        input.value = (baseInputValue + interimText).trim();
+                    },
+                    () => isListening,
+                    () => stopVoiceInput()
+                );
+            }
+            if (!recognition) {
+                alert('이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 또는 Edge 최신 버전을 사용해 주세요.');
+                return;
+            }
+            isListening = true;
+            baseInputValue = input.value ? input.value + ' ' : '';
+            micStatus.classList.remove('hidden');
+            try { recognition.start(); } catch (e) {}
+        }
+
+        function stopVoiceInput() {
+            if (!isListening) return;
+            isListening = false;
+            micStatus.classList.add('hidden');
+            if (recognition) recognition.stop();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() !== 'v' || e.repeat) return;
+            const active = document.activeElement;
+            const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+            if (isTyping) return; // 입력창에 글자를 치고 있는 중이면 그냥 'v' 글자가 입력되게 둠
+            e.preventDefault();
+            startVoiceInput();
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key.toLowerCase() !== 'v') return;
+            stopVoiceInput();
+        });
+
+        // 다른 창/탭으로 포커스가 넘어가는 등 예외 상황에서 마이크가 계속 켜진 채로 남지 않도록 처리
+        window.addEventListener('blur', stopVoiceInput);
+        /* =================================================================== */
+
+        /* ===================== 마이크 설정 / 테스트 모달 ===================== */
+        const micSettingsModal = document.getElementById('micSettingsModal');
+        const sttSupportBadge = document.getElementById('sttSupportBadge');
+        const micPermissionBadge = document.getElementById('micPermissionBadge');
+        const micDeviceSelect = document.getElementById('micDeviceSelect');
+        const levelTestBtn = document.getElementById('levelTestBtn');
+        const levelBar = document.getElementById('levelBar');
+        const levelStatusText = document.getElementById('levelStatusText');
+        const sttTestBtn = document.getElementById('sttTestBtn');
+        const sttTestResult = document.getElementById('sttTestResult');
+        let micPermissionState = 'unknown';
+
+        function setBadge(el, text, colorClass) {
+            el.textContent = text;
+            el.className = colorClass;
+        }
+
+        function updateSttSupportBadge() {
+            const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+            setBadge(sttSupportBadge, supported ? '지원됨 ✅' : '지원 안 됨 ❌', supported ? 'text-green-400' : 'text-red-400');
+        }
+
+        async function updateMicPermissionBadge() {
+            if (!navigator.permissions || !navigator.permissions.query) {
+                micPermissionState = 'unknown';
+                setBadge(micPermissionBadge, '확인 불가', 'text-gray-400');
+                return;
+            }
+            try {
+                const status = await navigator.permissions.query({ name: 'microphone' });
+                micPermissionState = status.state;
+                const map = {
+                    granted: ['허용됨 ✅', 'text-green-400'],
+                    denied: ['거부됨 ❌', 'text-red-400'],
+                    prompt: ['확인 필요 ⚠️', 'text-yellow-400'],
+                };
+                const [text, cls] = map[status.state] || ['알 수 없음', 'text-gray-400'];
+                setBadge(micPermissionBadge, text, cls);
+                status.onchange = () => updateMicPermissionBadge();
+            } catch (e) {
+                micPermissionState = 'unknown';
+                setBadge(micPermissionBadge, '확인 불가', 'text-gray-400');
+            }
+        }
+
+        async function refreshMicDevices() {
+            try {
+                // 장치 이름(label)을 보려면 먼저 마이크 권한이 필요함
+                const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                tempStream.getTracks().forEach(t => t.stop());
+            } catch (err) {
+                micDeviceSelect.innerHTML = '<option value="">마이크 접근이 거부되었습니다</option>';
+                updateMicPermissionBadge();
+                return;
+            }
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const mics = devices.filter(d => d.kind === 'audioinput');
+            micDeviceSelect.innerHTML = '';
+            if (mics.length === 0) {
+                micDeviceSelect.innerHTML = '<option value="">마이크를 찾을 수 없습니다</option>';
+            } else {
+                mics.forEach((d, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId;
+                    opt.textContent = d.label || `마이크 ${i + 1}`;
+                    micDeviceSelect.appendChild(opt);
+                });
+            }
+            updateMicPermissionBadge();
+        }
+
+        async function openMicSettings() {
+            micSettingsModal.classList.remove('hidden');
+            updateSttSupportBadge();
+            await updateMicPermissionBadge();
+            // 이미 마이크 권한이 허용되어 있다면 장치 목록을 바로 불러옴
+            if (micPermissionState === 'granted') {
+                refreshMicDevices();
+            }
+        }
+
+        function closeMicSettings() {
+            micSettingsModal.classList.add('hidden');
+            stopLevelTest();
+            stopSttTest();
+        }
+
+        // ---- 소리 감지(입력 레벨) 테스트 ----
+        let levelStream = null;
+        let levelAudioCtx = null;
+        let levelAnalyser = null;
+        let levelRAF = null;
+        let isLevelTesting = false;
+
+        async function toggleLevelTest() {
+            if (isLevelTesting) { stopLevelTest(); return; }
+
+            const deviceId = micDeviceSelect.value || undefined;
+            try {
+                levelStream = await navigator.mediaDevices.getUserMedia({
+                    audio: deviceId ? { deviceId: { exact: deviceId } } : true
+                });
+            } catch (err) {
+                levelStatusText.textContent = '마이크에 접근할 수 없습니다: ' + err.message;
+                return;
+            }
+
+            isLevelTesting = true;
+            levelTestBtn.textContent = '테스트 중지';
+            levelAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = levelAudioCtx.createMediaStreamSource(levelStream);
+            levelAnalyser = levelAudioCtx.createAnalyser();
+            levelAnalyser.fftSize = 512;
+            source.connect(levelAnalyser);
+            const data = new Uint8Array(levelAnalyser.frequencyBinCount);
+
+            function tick() {
+                levelAnalyser.getByteFrequencyData(data);
+                const avg = data.reduce((a, b) => a + b, 0) / data.length;
+                const pct = Math.min(100, Math.round((avg / 100) * 100));
+                levelBar.style.width = pct + '%';
+                levelStatusText.textContent = pct > 6
+                    ? '🎙️ 소리가 감지되고 있어요'
+                    : '조용합니다. 마이크에 말해보세요.';
+                levelRAF = requestAnimationFrame(tick);
+            }
+            tick();
+        }
+
+        function stopLevelTest() {
+            isLevelTesting = false;
+            if (levelTestBtn) levelTestBtn.textContent = '테스트 시작';
+            if (levelRAF) cancelAnimationFrame(levelRAF);
+            levelRAF = null;
+            if (levelStream) levelStream.getTracks().forEach(t => t.stop());
+            levelStream = null;
+            if (levelAudioCtx) levelAudioCtx.close();
+            levelAudioCtx = null;
+            if (levelBar) levelBar.style.width = '0%';
+            if (levelStatusText) levelStatusText.textContent = '테스트 시작을 누르고 마이크에 말해보세요.';
+        }
+
+        // 테스트 중 장치를 바꾸면 새 장치로 다시 시작
+        micDeviceSelect.addEventListener('change', () => {
+            if (isLevelTesting) { stopLevelTest(); toggleLevelTest(); }
+        });
+
+        // ---- 음성 → 텍스트 인식 테스트 ----
+        let testRecognition = null;
+        let isTestListening = false;
+        let testBaseText = '';
+
+        function toggleSttTest() {
+            if (isTestListening) { stopSttTest(); return; }
+
+            if (!testRecognition) {
+                testRecognition = createSpeechRecognizer(
+                    (finalText, interimText) => {
+                        if (finalText) testBaseText += finalText;
+                        sttTestResult.textContent = (testBaseText + interimText).trim() || '여기에 인식된 텍스트가 표시됩니다.';
+                    },
+                    () => isTestListening,
+                    () => stopSttTest()
+                );
+            }
+            if (!testRecognition) {
+                sttTestResult.textContent = '이 브라우저는 음성 인식을 지원하지 않습니다.';
+                return;
+            }
+
+            isTestListening = true;
+            testBaseText = '';
+            sttTestBtn.textContent = '테스트 중지';
+            sttTestResult.textContent = '듣고 있어요...';
+            try { testRecognition.start(); } catch (e) {}
+        }
+
+        function stopSttTest() {
+            isTestListening = false;
+            if (sttTestBtn) sttTestBtn.textContent = '테스트 시작';
+            if (testRecognition) testRecognition.stop();
+        }
+        /* =================================================================== */
 
         function addMessage(role, content) {
             const div = document.createElement('div');
@@ -64,6 +492,9 @@
                     if (lastMsg) lastMsg.querySelector('div').textContent += data.content;
                 } else if (data.type === 'done') {
                     history.push({role: "assistant", content: data.content});
+
+                    // AI 답변이 완료되면 자동으로 TTS로 읽어주기
+                    if (autoTTSEnabled) speakText(data.content);
                 }
             };
         }
@@ -71,6 +502,8 @@
         async function sendMessage() {
             const message = input.value.trim();
             if (!message || !ws) return;
+
+            stopSpeaking(); // 새 메시지를 보낼 때 이전에 읽고 있던 음성은 중단
 
             addMessage('user', message);
             history.push({role: "user", content: message});

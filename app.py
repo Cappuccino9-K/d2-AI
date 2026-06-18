@@ -76,9 +76,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             messages = [
-                {"role": "system", "content": "당신은 친절하고 똑똑한 AI 개인 비서입니다. 한국어로 자연스럽게 답변해주세요."}
+                {"role": "system", "content": "당신은 친절하고 똑똑한 친구같은 AI 개인 비서입니다. 한국어로 자연스럽게 답변해주세요."}
             ]
-
             if "history" in data:
                 messages.extend(data["history"])
 
