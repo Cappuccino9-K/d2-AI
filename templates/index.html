@@ -17,6 +17,13 @@
     <div class="max-w-4xl mx-auto p-4">
         <h1 class="text-3xl font-bold text-center mb-6 flex items-center justify-center gap-3">
             <i class="fas fa-robot"></i> Qwen2.5-7B AI
+            
+            <select id="voiceStyleSelect" class="bg-gray-800 text-sm text-gray-300 rounded-xl px-3 py-2 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2">
+                <option value="default">기본 음성</option>
+                <option value="cute" selected>여성 음성 🎀</option>
+                <option value="deep">남성 음성 🎙️</option>
+            </select>
+
             <button
                 id="ttsToggle"
                 onclick="toggleAutoTTS()"
@@ -35,26 +42,33 @@
         <div id="chat" class="chat-container bg-gray-800 rounded-2xl p-6 overflow-y-auto mb-4 space-y-4"></div>
 
         <div class="flex gap-2">
+            <button 
+                id="alwaysOnBtn"
+                onclick="toggleAlwaysOn()"
+                class="bg-gray-700 hover:bg-gray-600 px-4 rounded-xl font-medium transition text-sm flex items-center gap-2 text-gray-400 shrink-0"
+                title="마이크를 항상 켜두고 대화가 끝나면 자동 전송합니다">
+                <i class="fas fa-headset"></i> <span>상시 인식 끄기</span>
+            </button>
+
             <input 
                 id="input" 
                 type="text" 
                 class="flex-1 bg-gray-700 rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="메시지를 입력하세요... (V를 눌러서 말하기)"
+                placeholder="메시지를 입력하세요... (상시 인식이 꺼졌을 땐 창 클릭 후 V 키로 토글)"
                 onkeypress="if(event.key === 'Enter') sendMessage()">
             <button 
                 onclick="sendMessage()"
-                class="bg-blue-600 hover:bg-blue-700 px-8 rounded-xl font-medium transition">
+                class="bg-blue-600 hover:bg-blue-700 px-8 rounded-xl font-medium transition shrink-0">
                 <i class="fas fa-paper-plane"></i>
             </button>
         </div>
 
         <div id="micStatus" class="hidden mt-3 flex items-center justify-center gap-2 text-sm text-red-400">
             <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-            음성 인식 중입니다... (V 키를 떼면 종료)
+            <span id="micStatusText">음성 인식 중입니다...</span>
         </div>
     </div>
 
-    <!-- 마이크 설정 / 테스트 모달 -->
     <div id="micSettingsModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeMicSettings()">
         <div class="bg-gray-800 rounded-2xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between">
@@ -65,8 +79,6 @@
                     <i class="fas fa-xmark"></i>
                 </button>
             </div>
-
-            <!-- 지원 여부 / 권한 상태 -->
             <div class="bg-gray-900 rounded-xl p-4 text-sm space-y-2">
                 <div class="flex justify-between">
                     <span class="text-gray-400">음성 인식(STT) 지원</span>
@@ -77,8 +89,6 @@
                     <span id="micPermissionBadge">확인 중...</span>
                 </div>
             </div>
-
-            <!-- 장치 선택 -->
             <div class="space-y-2">
                 <label class="text-sm text-gray-400 flex items-center justify-between">
                     입력 장치 선택
@@ -90,8 +100,6 @@
                     <option>장치 목록을 불러오려면 새로고침을 눌러주세요</option>
                 </select>
             </div>
-
-            <!-- 입력 레벨(소리 감지) 테스트 -->
             <div class="space-y-2">
                 <div class="flex items-center justify-between">
                     <span class="text-sm text-gray-400">소리 감지 테스트</span>
@@ -102,10 +110,7 @@
                 <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
                     <div id="levelBar" class="h-full bg-green-500 transition-all" style="width: 0%"></div>
                 </div>
-                <p id="levelStatusText" class="text-xs text-gray-500">테스트 시작을 누르고 마이크에 말해보세요.</p>
             </div>
-
-            <!-- 실시간 인식 테스트 -->
             <div class="space-y-2">
                 <div class="flex items-center justify-between">
                     <span class="text-sm text-gray-400">음성 → 텍스트 인식 테스트</span>
@@ -117,10 +122,6 @@
                     여기에 인식된 텍스트가 표시됩니다.
                 </div>
             </div>
-
-            <p class="text-xs text-gray-500 leading-relaxed">
-                참고: 위 장치 선택은 "소리 감지 테스트"에만 적용됩니다. 브라우저의 음성 인식(V키 기능)은 운영체제에 설정된 기본 마이크를 사용하므로, 특정 장치를 강제로 쓰고 싶다면 OS의 사운드 설정에서 기본 입력 장치를 바꿔야 합니다.
-            </p>
         </div>
     </div>
 
@@ -128,11 +129,39 @@
         const chat = document.getElementById('chat');
         const input = document.getElementById('input');
         const ttsToggleBtn = document.getElementById('ttsToggle');
+        const voiceStyleSelect = document.getElementById('voiceStyleSelect');
+        const micStatusText = document.getElementById('micStatusText');
         let history = [];
+        let idleTimer = null; 
+        let isAlwaysOn = false; // 상시 음성인식 활성화 여부 flag
+
+        /* ===================== 타이머: 5초 미입력 시 자동 전송 ===================== */
+        function startIdleTimer() {
+            stopIdleTimer();
+            if (input.value.trim().length > 0) {
+                idleTimer = setTimeout(() => {
+                    if (isListening) {
+                        stopVoiceInput(true); // 음성인식 종료하면서 메시지 자동 전송
+                    } else {
+                        sendMessage();
+                    }
+                }, 5000);
+            }
+        }
+
+        function stopIdleTimer() {
+            if (idleTimer) {
+                clearTimeout(idleTimer);
+                idleTimer = null;
+            }
+        }
+
+        input.addEventListener('input', startIdleTimer);
+
 
         /* ===================== TTS (Text-to-Speech) ===================== */
-        let autoTTSEnabled = true;   // AI 답변이 끝나면 자동으로 읽어줄지 여부
-        let koreanVoice = null;      // 사용 가능한 한국어 음성 캐시
+        let autoTTSEnabled = true;   
+        let koreanVoice = null;      
 
         function loadVoices() {
             if (!('speechSynthesis' in window)) return;
@@ -145,11 +174,9 @@
 
         if ('speechSynthesis' in window) {
             loadVoices();
-            // 일부 브라우저(Chrome 등)는 음성 목록을 비동기로 불러옴
             speechSynthesis.onvoiceschanged = loadVoices;
         }
 
-        // HTML 태그 및 마크다운 기호를 제거해 듣기 자연스러운 텍스트로 변환
         function stripForSpeech(rawText) {
             const tmp = document.createElement('div');
             tmp.innerHTML = rawText;
@@ -163,13 +190,23 @@
             const text = stripForSpeech(rawText);
             if (!text) return;
 
-            speechSynthesis.cancel(); // 이전에 재생 중인 음성은 중단 후 새로 시작
+            speechSynthesis.cancel(); 
 
             const utter = new SpeechSynthesisUtterance(text);
             utter.lang = 'ko-KR';
-            utter.rate = 1;
-            utter.pitch = 1;
             if (koreanVoice) utter.voice = koreanVoice;
+
+            const style = voiceStyleSelect.value;
+            if (style === 'cute') {
+                utter.pitch = 1.4; 
+                utter.rate = 1.05;  
+            } else if (style === 'deep') {
+                utter.pitch = 0.7; 
+                utter.rate = 0.95;
+            } else {
+                utter.pitch = 1.0; 
+                utter.rate = 1.0;
+            }
 
             speechSynthesis.speak(utter);
         }
@@ -187,20 +224,17 @@
                 : '<i class="fas fa-volume-mute"></i>';
             if (!autoTTSEnabled) stopSpeaking();
         }
-        /* =================================================================== */
+
 
         /* ===================== 공통: SpeechRecognition 생성 팩토리 ===================== */
-        // onUpdate(finalText, interimText): 인식 결과가 들어올 때마다 호출
-        // getIsActive(): 계속 들어야 하는 상태인지 (true면 onend에서 자동 재시작)
-        // onErrorCb(errorCode): 오류 발생 시 호출
         function createSpeechRecognizer(onUpdate, getIsActive, onErrorCb) {
             const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognitionImpl) return null;
 
             const recog = new SpeechRecognitionImpl();
             recog.lang = 'ko-KR';
-            recog.continuous = true;     // 멈추라고 할 때까지 계속 인식
-            recog.interimResults = true; // 인식 중인 내용도 실시간으로 보여줌
+            recog.continuous = true;     
+            recog.interimResults = true; 
 
             recog.onresult = (event) => {
                 let finalText = '';
@@ -219,8 +253,7 @@
             };
 
             recog.onend = () => {
-                // continuous 모드라도 브라우저가 중간에 자동으로 멈추는 경우가 있어
-                // 계속 듣는 상태라면 다시 시작해줌
+                // 브라우저가 강제로 인식을 끊었을 때, 상시인식이나 V키 켜짐 상태라면 즉시 재시작
                 if (getIsActive && getIsActive()) {
                     try { recog.start(); } catch (e) {}
                 }
@@ -228,13 +261,13 @@
 
             return recog;
         }
-        /* =================================================================== */
 
-        /* ===================== STT (V키를 눌러서 말하기) ===================== */
+
+        /* ===================== STT 코어 로직 ===================== */
         const micStatus = document.getElementById('micStatus');
-        let recognition = null;   // 푸시투토크용 SpeechRecognition 인스턴스
-        let isListening = false;  // 현재 V키를 눌러 녹음 중인지 여부
-        let baseInputValue = '';  // 녹음 시작 시점에 입력창에 있던 텍스트 (이어쓰기용)
+        let recognition = null;   
+        let isListening = false;  
+        let baseInputValue = '';  
 
         function startVoiceInput() {
             if (isListening) return;
@@ -243,239 +276,156 @@
                     (finalText, interimText) => {
                         if (finalText) baseInputValue += finalText;
                         input.value = (baseInputValue + interimText).trim();
+                        startIdleTimer(); // 실시간 말하는 중에도 5초 타이머 계속 갱신
                     },
-                    () => isListening,
-                    () => stopVoiceInput()
+                    () => isListening || isAlwaysOn, // 상시인식 켜져있으면 끝내지 않고 유지
+                    () => stopVoiceInput(false)
                 );
             }
             if (!recognition) {
-                alert('이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 또는 Edge 최신 버전을 사용해 주세요.');
+                alert('이 브라우저는 음성 인식을 지원하지 않습니다.');
                 return;
             }
             isListening = true;
             baseInputValue = input.value ? input.value + ' ' : '';
+            
+            // UI 문구 변경
+            micStatusText.textContent = isAlwaysOn 
+                ? "상시 음성 인식 활성화 중... (말을 멈추면 5초 뒤 자동 전송)" 
+                : "음성 인식 중입니다... (V 키를 다시 누르면 종료 및 전송)";
             micStatus.classList.remove('hidden');
+            
             try { recognition.start(); } catch (e) {}
         }
 
-        function stopVoiceInput() {
+        function stopVoiceInput(autoSend = true) {
             if (!isListening) return;
             isListening = false;
             micStatus.classList.add('hidden');
             if (recognition) recognition.stop();
+            
+            if (autoSend) {
+                setTimeout(() => {
+                    sendMessage();
+                }, 300);
+            }
         }
 
+        /* ===================== 상시 음성인식 토글 컨트롤 ===================== */
+        function toggleAlwaysOn() {
+            isAlwaysOn = !isAlwaysOn;
+            const btn = document.getElementById('alwaysOnBtn');
+            
+            if (isAlwaysOn) {
+                // 활성화 스타일 적용
+                btn.classList.remove('bg-gray-700', 'text-gray-400', 'hover:bg-gray-600');
+                btn.classList.add('bg-green-600', 'text-white', 'hover:bg-green-700');
+                btn.querySelector('span').textContent = '상시 인식 켜짐';
+                
+                // 마이크 상시 기동 시작
+                startVoiceInput();
+            } else {
+                // 비활성화 스타일 복구
+                btn.classList.remove('bg-green-600', 'text-white', 'hover:bg-green-700');
+                btn.classList.add('bg-gray-700', 'text-gray-400', 'hover:bg-gray-600');
+                btn.querySelector('span').textContent = '상시 인식 끄기';
+                
+                // 마이크 끄기 (전송은 하지 않음)
+                stopVoiceInput(false);
+            }
+        }
+
+        // 키보드 V 토글 (상시 인식이 꺼져있을 때만 수동 작동)
         document.addEventListener('keydown', (e) => {
-            if (e.key.toLowerCase() !== 'v' || e.repeat) return;
+            if (e.key.toLowerCase() !== 'v' || e.repeat || isAlwaysOn) return;
+            
             const active = document.activeElement;
             const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
-            if (isTyping) return; // 입력창에 글자를 치고 있는 중이면 그냥 'v' 글자가 입력되게 둠
+            if (isTyping) return; 
+            
             e.preventDefault();
-            startVoiceInput();
+            if (isListening) {
+                stopVoiceInput(true); 
+            } else {
+                startVoiceInput();   
+            }
         });
 
-        document.addEventListener('keyup', (e) => {
-            if (e.key.toLowerCase() !== 'v') return;
-            stopVoiceInput();
+        window.addEventListener('blur', () => {
+            // 창 포커스를 잃어도 상시인식 모드라면 마이크를 강제로 끄지 않음 (최소화만 안 하면 유지됨)
+            if (!isAlwaysOn) stopVoiceInput(false);
         });
 
-        // 다른 창/탭으로 포커스가 넘어가는 등 예외 상황에서 마이크가 계속 켜진 채로 남지 않도록 처리
-        window.addEventListener('blur', stopVoiceInput);
-        /* =================================================================== */
 
-        /* ===================== 마이크 설정 / 테스트 모달 ===================== */
+        /* ===================== 마이크 설정 / 테스트 모달 (기존 동일) ===================== */
         const micSettingsModal = document.getElementById('micSettingsModal');
-        const sttSupportBadge = document.getElementById('sttSupportBadge');
-        const micPermissionBadge = document.getElementById('micPermissionBadge');
-        const micDeviceSelect = document.getElementById('micDeviceSelect');
-        const levelTestBtn = document.getElementById('levelTestBtn');
-        const levelBar = document.getElementById('levelBar');
-        const levelStatusText = document.getElementById('levelStatusText');
-        const sttTestBtn = document.getElementById('sttTestBtn');
-        const sttTestResult = document.getElementById('sttTestResult');
+        const dsttSupportBadge = document.getElementById('sttSupportBadge');
+        const dmicPermissionBadge = document.getElementById('micPermissionBadge');
+        const dmicDeviceSelect = document.getElementById('micDeviceSelect');
+        const dlevelTestBtn = document.getElementById('levelTestBtn');
+        const dlevelBar = document.getElementById('levelBar');
         let micPermissionState = 'unknown';
 
-        function setBadge(el, text, colorClass) {
-            el.textContent = text;
-            el.className = colorClass;
-        }
-
+        function setBadge(el, text, colorClass) { el.textContent = text; el.className = colorClass; }
         function updateSttSupportBadge() {
             const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-            setBadge(sttSupportBadge, supported ? '지원됨 ✅' : '지원 안 됨 ❌', supported ? 'text-green-400' : 'text-red-400');
+            setBadge(dsttSupportBadge, supported ? '지원됨 ✅' : '지원 안 됨 ❌', supported ? 'text-green-400' : 'text-red-400');
         }
-
         async function updateMicPermissionBadge() {
-            if (!navigator.permissions || !navigator.permissions.query) {
-                micPermissionState = 'unknown';
-                setBadge(micPermissionBadge, '확인 불가', 'text-gray-400');
-                return;
-            }
+            if (!navigator.permissions || !navigator.permissions.query) return;
             try {
                 const status = await navigator.permissions.query({ name: 'microphone' });
                 micPermissionState = status.state;
-                const map = {
-                    granted: ['허용됨 ✅', 'text-green-400'],
-                    denied: ['거부됨 ❌', 'text-red-400'],
-                    prompt: ['확인 필요 ⚠️', 'text-yellow-400'],
-                };
+                const map = { granted: ['허용됨 ✅', 'text-green-400'], denied: ['거부됨 ❌', 'text-red-400'], prompt: ['확인 필요 ⚠️', 'text-yellow-400'] };
                 const [text, cls] = map[status.state] || ['알 수 없음', 'text-gray-400'];
-                setBadge(micPermissionBadge, text, cls);
-                status.onchange = () => updateMicPermissionBadge();
-            } catch (e) {
-                micPermissionState = 'unknown';
-                setBadge(micPermissionBadge, '확인 불가', 'text-gray-400');
-            }
+                setBadge(dmicPermissionBadge, text, cls);
+            } catch (e) {}
         }
-
         async function refreshMicDevices() {
-            try {
-                // 장치 이름(label)을 보려면 먼저 마이크 권한이 필요함
-                const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                tempStream.getTracks().forEach(t => t.stop());
-            } catch (err) {
-                micDeviceSelect.innerHTML = '<option value="">마이크 접근이 거부되었습니다</option>';
-                updateMicPermissionBadge();
-                return;
-            }
+            try { const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true }); tempStream.getTracks().forEach(t => t.stop()); } catch (err) { return; }
             const devices = await navigator.mediaDevices.enumerateDevices();
             const mics = devices.filter(d => d.kind === 'audioinput');
-            micDeviceSelect.innerHTML = '';
-            if (mics.length === 0) {
-                micDeviceSelect.innerHTML = '<option value="">마이크를 찾을 수 없습니다</option>';
-            } else {
-                mics.forEach((d, i) => {
-                    const opt = document.createElement('option');
-                    opt.value = d.deviceId;
-                    opt.textContent = d.label || `마이크 ${i + 1}`;
-                    micDeviceSelect.appendChild(opt);
-                });
-            }
-            updateMicPermissionBadge();
+            dmicDeviceSelect.innerHTML = '';
+            mics.forEach((d, i) => {
+                const opt = document.createElement('option'); opt.value = d.deviceId; opt.textContent = d.label || `마이크 ${i + 1}`; dmicDeviceSelect.appendChild(opt);
+            });
         }
+        async function openMicSettings() { micSettingsModal.classList.remove('hidden'); updateSttSupportBadge(); await updateMicPermissionBadge(); if (micPermissionState === 'granted') refreshMicDevices(); }
+        function closeMicSettings() { micSettingsModal.classList.add('hidden'); stopLevelTest(); stopSttTest(); }
 
-        async function openMicSettings() {
-            micSettingsModal.classList.remove('hidden');
-            updateSttSupportBadge();
-            await updateMicPermissionBadge();
-            // 이미 마이크 권한이 허용되어 있다면 장치 목록을 바로 불러옴
-            if (micPermissionState === 'granted') {
-                refreshMicDevices();
-            }
-        }
-
-        function closeMicSettings() {
-            micSettingsModal.classList.add('hidden');
-            stopLevelTest();
-            stopSttTest();
-        }
-
-        // ---- 소리 감지(입력 레벨) 테스트 ----
-        let levelStream = null;
-        let levelAudioCtx = null;
-        let levelAnalyser = null;
-        let levelRAF = null;
-        let isLevelTesting = false;
-
+        let levelStream = null; let levelAudioCtx = null; let levelAnalyser = null; let levelRAF = null; let isLevelTesting = false;
         async function toggleLevelTest() {
             if (isLevelTesting) { stopLevelTest(); return; }
-
-            const deviceId = micDeviceSelect.value || undefined;
-            try {
-                levelStream = await navigator.mediaDevices.getUserMedia({
-                    audio: deviceId ? { deviceId: { exact: deviceId } } : true
-                });
-            } catch (err) {
-                levelStatusText.textContent = '마이크에 접근할 수 없습니다: ' + err.message;
-                return;
-            }
-
-            isLevelTesting = true;
-            levelTestBtn.textContent = '테스트 중지';
+            try { levelStream = await navigator.mediaDevices.getUserMedia({ audio: dmicDeviceSelect.value ? { deviceId: { exact: dmicDeviceSelect.value } } : true }); } catch (err) { return; }
+            isLevelTesting = true; dlevelTestBtn.textContent = '테스트 중지';
             levelAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const source = levelAudioCtx.createMediaStreamSource(levelStream);
-            levelAnalyser = levelAudioCtx.createAnalyser();
-            levelAnalyser.fftSize = 512;
-            source.connect(levelAnalyser);
+            levelAnalyser = levelAudioCtx.createAnalyser(); levelAnalyser.fftSize = 512; source.connect(levelAnalyser);
             const data = new Uint8Array(levelAnalyser.frequencyBinCount);
-
             function tick() {
                 levelAnalyser.getByteFrequencyData(data);
                 const avg = data.reduce((a, b) => a + b, 0) / data.length;
-                const pct = Math.min(100, Math.round((avg / 100) * 100));
-                levelBar.style.width = pct + '%';
-                levelStatusText.textContent = pct > 6
-                    ? '🎙️ 소리가 감지되고 있어요'
-                    : '조용합니다. 마이크에 말해보세요.';
+                dlevelBar.style.width = Math.min(100, Math.round((avg / 100) * 100)) + '%';
                 levelRAF = requestAnimationFrame(tick);
             }
             tick();
         }
-
-        function stopLevelTest() {
-            isLevelTesting = false;
-            if (levelTestBtn) levelTestBtn.textContent = '테스트 시작';
-            if (levelRAF) cancelAnimationFrame(levelRAF);
-            levelRAF = null;
-            if (levelStream) levelStream.getTracks().forEach(t => t.stop());
-            levelStream = null;
-            if (levelAudioCtx) levelAudioCtx.close();
-            levelAudioCtx = null;
-            if (levelBar) levelBar.style.width = '0%';
-            if (levelStatusText) levelStatusText.textContent = '테스트 시작을 누르고 마이크에 말해보세요.';
-        }
-
-        // 테스트 중 장치를 바꾸면 새 장치로 다시 시작
-        micDeviceSelect.addEventListener('change', () => {
-            if (isLevelTesting) { stopLevelTest(); toggleLevelTest(); }
-        });
-
-        // ---- 음성 → 텍스트 인식 테스트 ----
-        let testRecognition = null;
-        let isTestListening = false;
-        let testBaseText = '';
-
+        function stopLevelTest() { isLevelTesting = false; if (dlevelTestBtn) dlevelTestBtn.textContent = '테스트 시작'; if (levelRAF) cancelAnimationFrame(levelRAF); if (levelStream) levelStream.getTracks().forEach(t => t.stop()); if (dlevelBar) dlevelBar.style.width = '0%'; }
+        let testRecognition = null; let isTestListening = false;
         function toggleSttTest() {
             if (isTestListening) { stopSttTest(); return; }
-
-            if (!testRecognition) {
-                testRecognition = createSpeechRecognizer(
-                    (finalText, interimText) => {
-                        if (finalText) testBaseText += finalText;
-                        sttTestResult.textContent = (testBaseText + interimText).trim() || '여기에 인식된 텍스트가 표시됩니다.';
-                    },
-                    () => isTestListening,
-                    () => stopSttTest()
-                );
-            }
-            if (!testRecognition) {
-                sttTestResult.textContent = '이 브라우저는 음성 인식을 지원하지 않습니다.';
-                return;
-            }
-
-            isTestListening = true;
-            testBaseText = '';
-            sttTestBtn.textContent = '테스트 중지';
-            sttTestResult.textContent = '듣고 있어요...';
-            try { testRecognition.start(); } catch (e) {}
+            testRecognition = createSpeechRecognizer((f, i) => { document.getElementById('sttTestResult').textContent = f + i; }, () => isTestListening, () => stopSttTest());
+            if (!testRecognition) return;
+            isTestListening = true; document.getElementById('sttTestBtn').textContent = '테스트 중지'; try { testRecognition.start(); } catch (e) {}
         }
+        function stopSttTest() { isTestListening = false; if (document.getElementById('sttTestBtn')) document.getElementById('sttTestBtn').textContent = '테스트 시작'; if (testRecognition) testRecognition.stop(); }
 
-        function stopSttTest() {
-            isTestListening = false;
-            if (sttTestBtn) sttTestBtn.textContent = '테스트 시작';
-            if (testRecognition) testRecognition.stop();
-        }
-        /* =================================================================== */
 
+        /* ===================== 메시지 송수신 및 사이클 관리 ===================== */
         function addMessage(role, content) {
             const div = document.createElement('div');
             div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
-            div.innerHTML = `
-                <div class="message px-5 py-3 rounded-2xl ${role === 'user' ? 
-                    'bg-blue-600' : 'bg-gray-700'}">
-                    ${content}
-                </div>
-            `;
+            div.innerHTML = `<div class="message px-5 py-3 rounded-2xl ${role === 'user' ? 'bg-blue-600' : 'bg-gray-700'}">${content}</div>`;
             chat.appendChild(div);
             chat.scrollTop = chat.scrollHeight;
         }
@@ -483,48 +433,49 @@
         let ws;
         function connectWebSocket() {
             ws = new WebSocket(`ws://${location.host}/ws/chat`);
-            
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 if (data.type === 'stream') {
-                    // 마지막 assistant 메시지 업데이트 (스트리밍)
                     const lastMsg = chat.lastElementChild;
                     if (lastMsg) lastMsg.querySelector('div').textContent += data.content;
                 } else if (data.type === 'done') {
                     history.push({role: "assistant", content: data.content});
-
-                    // AI 답변이 완료되면 자동으로 TTS로 읽어주기
                     if (autoTTSEnabled) speakText(data.content);
                 }
             };
         }
 
         async function sendMessage() {
+            stopIdleTimer(); 
             const message = input.value.trim();
-            if (!message || !ws) return;
+            
+            if (!message || !ws) {
+                // 메시지가 비었는데 상시 인식이 켜져 있다면 다시 즉시 마이크 루프 가동
+                if (isAlwaysOn && !isListening) startVoiceInput();
+                return;
+            }
 
-            stopSpeaking(); // 새 메시지를 보낼 때 이전에 읽고 있던 음성은 중단
-
+            stopSpeaking(); 
             addMessage('user', message);
             history.push({role: "user", content: message});
             input.value = '';
 
-            // Assistant 자리 미리 만들기
             const assistantDiv = document.createElement('div');
             assistantDiv.className = "flex justify-start";
-            assistantDiv.innerHTML = `
-                <div class="message px-5 py-3 rounded-2xl bg-gray-700">생각중...</div>
-            `;
+            assistantDiv.innerHTML = `<div class="message px-5 py-3 rounded-2xl bg-gray-700">생각중...</div>`;
             chat.appendChild(assistantDiv);
             chat.scrollTop = chat.scrollHeight;
 
-            ws.send(JSON.stringify({
-                message: message,
-                history: history
-            }));
+            ws.send(JSON.stringify({ message: message, history: history }));
+
+            // [핵심] 메시지가 전송 완료되면 상시 인식 모드일 때 자동으로 마이크를 리셋하여 다시 켭니다.
+            if (isAlwaysOn) {
+                setTimeout(() => {
+                    startVoiceInput();
+                }, 400); // 전송 패킷 처리와 꼬이지 않도록 미세한 버퍼 부여
+            }
         }
 
-        // 초기 연결
         connectWebSocket();
     </script>
 </body>
